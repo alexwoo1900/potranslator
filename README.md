@@ -1,4 +1,4 @@
-README: [ENGLIST](https://github.com/alexwoo1900/potranslator/blob/master/README.md) | [简体中文](https://github.com/alexwoo1900/potranslator/blob/master/README_CN.md)
+README: [ENGLIST](https://github.com/alexwoo1900/potranslator/blob/main/README.md) | [简体中文](https://github.com/alexwoo1900/potranslator/blob/main/README_CN.md)
 
 ## PO Translator
 
@@ -6,7 +6,7 @@ Automated translation scripts for .po or .pot file.
 
 ## Demo
 
-![Demo](https://raw.githubusercontent.com/alexwoo1900/potranslator/master/demo.gif)
+![Demo](https://raw.githubusercontent.com/alexwoo1900/potranslator/main/demo.gif)
 
 ## Quick start
 
