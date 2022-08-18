@@ -1,14 +1,14 @@
 import os
 import sys
 import getopt
-import pathlib
+from pathlib import *
 from contextlib import contextmanager
 from translator.translator import ENGINES
 
 @contextmanager
-def opened_w_error(filename, mode='r'):
+def opened_w_error(path, mode='r'):
     try:
-        f = open(filename, mode, encoding="utf-8")
+        f = path.open(mode, encoding="utf-8")
     except IOError as err:
         yield None, err
     else:
@@ -33,8 +33,8 @@ class POTranslator:
         self._engine = cls()
         return self._engine is not None
 
-    def _parse_pot(self, pot_name):
-        with opened_w_error(pot_name, 'r') as (f, err):
+    def _parse_pot(self, pot_path):
+        with opened_w_error(pot_path, 'r') as (f, err):
             pot_data = []
             msgctxt_data = []
             msgid_data = []
@@ -188,9 +188,11 @@ class POTranslator:
                             else:
                                 f.write("\"{}\"\n".format(msgid_data[msgid_idx]))
 
-                    # no translatation for header
+                    # no translatation for header but need to reset charset
                     if "msgid" in msg_section and len(msg_section["msgid"]) == 1 and msgid_data[msg_section["msgid"][0]] == "":
                         for i, msgstr_idx in enumerate(msg_section["msgstr"]):
+                            if "charset=CHARSET" in msgstr_data[msgstr_idx]:
+                                msgstr_data[msgstr_idx] = msgstr_data[msgstr_idx].replace("charset=CHARSET", "charset=UTF-8")
                             if i == 0:
                                 f.write("msgstr \"{}\"\n".format(msgstr_data[msgstr_idx]))
                             else:
@@ -216,41 +218,46 @@ class POTranslator:
                     # write blank line
                     f.write('\n')
 
-    def generate_po(self, pot_file_path, pot_target_field, source_lang, dest_lang, output_file_path):
+    def generate_po(self, pot_file_path, pot_field_str, source_lang_str, dest_lang_str, output_dir_path):
         pot_data, msgctxt_data, msgid_data, msgstr_data = self._parse_pot(pot_file_path)
 
         translated_data = []
-        if pot_target_field == "msgid":
-            translated_data = self._translate(source_lang, dest_lang, msgid_data)
+        if pot_field_str == "msgid":
+            translated_data = self._translate(source_lang_str, dest_lang_str, msgid_data)
         else:
-            translated_data = self._translate(source_lang, dest_lang, msgstr_data)
-            
-        self._write_po(output_file_path, pot_data, msgctxt_data, msgid_data, msgstr_data, pot_target_field, translated_data)
-        print("{} generated".format(output_file_path))
+            translated_data = self._translate(source_lang_str, dest_lang_str, msgstr_data)
 
-    def generate_pos(self, pot_file_path, pot_target_field, pos_d_path):
-        for lang in SUPPORT_LANGUAGES[1:-1]:
+        po_d_path = output_dir_path.joinpath("locale/{}/LC_MESSAGES/".format(dest_lang_str))
+        po_d_path.mkdir(parents=True, exist_ok=True)
+        po_file_path = po_d_path.joinpath("{}.po".format(pot_file_path.stem))
+            
+        self._write_po(po_file_path, pot_data, msgctxt_data, msgid_data, msgstr_data, pot_field_str, translated_data)
+        print("{} generated".format(po_file_path))
+
+    def generate_pos(self, pot_file_path, pot_field_str, output_dir_path):
+        for dest_lang_str in SUPPORT_LANGUAGES[1:-1]:
             try:
-                self.generate_po(pot_file_path, pot_target_field, "auto", lang, pos_d_path + "{}.po".format(lang))
+                self.generate_po(pot_file_path, pot_field_str, "auto", dest_lang_str, output_dir_path)
             except IndexError as err:
-                print("Error occur in {}.po: {}".format(lang, err))
+                print("An error occurred while generating {}.po: {}".format(dest_lang_str, err))
 
 def print_usage():
-    print("Usage: main.py [options] -i template.pot -o translated.po")
+    print("Usage: main.py [options] -i template.pot -o output_directory")
+    print("")
+    print("  -i, --input=       POT/PO file path")
+    print("  -o, --output=      output folder path")
+    print("")
     print("Options:")
-    print("  -e <arg>      Translation Engine        ", SUPPORT_ENGINES)
-    print("  -s <arg>      Source Language           ", SUPPORT_LANGUAGES[:-1])
-    print("  -d <arg>      Destination Language      ", SUPPORT_LANGUAGES)
-    print("  -f <arg>      Treat msgid or msgstr     ", POT_TEXT_FIELD)
-    print("                as the original text")
-    print("                Default: msgid")
-    print("  -t <arg>      Output file format        ", SUPPORT_OUTPUT_FORMAT)
+    print("  -e, --engine=      Translation Engine        ", SUPPORT_ENGINES)
+    print("  -s, --source=      Source Language           ", SUPPORT_LANGUAGES[:-1])
+    print("  -d, --dest=        Destination Language      ", SUPPORT_LANGUAGES)
+    print("  -f, --field=       Treat msgid or msgstr     ", POT_TEXT_FIELD)
+    print("                     as the original text")
+    print("                     Default: msgid")
+    print("  -t, --type=        Output file format        ", SUPPORT_OUTPUT_FORMAT)
 
 def print_version():
     print("Version 0.01")
-
-def is_pot(name):
-    return pathlib.Path(name).is_file() and os.path.splitext(name)[-1].lower() in (".pot", ".po")
 
 def main(argv=None):
     if argv is None:
@@ -268,13 +275,12 @@ def main(argv=None):
 
 
     engine_type = SUPPORT_ENGINES[0]
-    source_lang = SUPPORT_LANGUAGES[0]
-    dest_lang = SUPPORT_LANGUAGES[0]
-    pot_target_field = POT_TEXT_FIELD[0]
-    output_file_format = SUPPORT_OUTPUT_FORMAT[0]
-    pot_file_path = ""
-    output_dir_path = "locale/"
-    output_file_path = ""
+    source_lang_str = SUPPORT_LANGUAGES[0]
+    dest_lang_str = SUPPORT_LANGUAGES[0]
+    pot_field_str = POT_TEXT_FIELD[0]
+    output_format_str = SUPPORT_OUTPUT_FORMAT[0]
+    pot_file_str = ""
+    output_dir_str = ""
 
     for opt_name, opt_value in opts:
         if opt_name in ("-h", "--help"):
@@ -286,36 +292,40 @@ def main(argv=None):
                 engine_type = opt_value
         elif opt_name in ("-s", "--source"):
             if opt_value in SUPPORT_LANGUAGES[:-1]:
-                source_lang = opt_value
+                source_lang_str = opt_value
         elif opt_name in ("-d", "--dest"):
             if opt_value in SUPPORT_LANGUAGES:
-                dest_lang = opt_value
+                dest_lang_str = opt_value
         elif opt_name in ("-f", "--field"):
             if opt_value in POT_TEXT_FIELD:
-                pot_target_field = opt_value
+                pot_field_str = opt_value
         elif opt_name in ("-i", "--input"):
-            pot_file_path = opt_value
+            pot_file_str = opt_value
         elif opt_name in ("-o", "--output"):
-            output_file_path = opt_value
+            output_dir_str = opt_value
 
-    if not is_pot(pot_file_path):
+    pot_file_path = Path(pot_file_str)
+    if not pot_file_path.is_file() and pot_file_path.suffix in (".pot", "po"):
         print("Illegal input file: ", pot_file_path)
         print_usage()
         return -1
 
-    if dest_lang != "all" and not output_file_path:
-        print("Missing output file path.")
+    output_dir_path = Path(output_dir_str)
+    if not output_dir_path.exists():
+        output_dir_path.mkdir(parents=True)
+    elif not output_dir_path.is_dir():
+        print("Illegal output folder path: ", output_dir_path)
         print_usage()
         return -1
 
     translator = POTranslator(engine_type)
 
-    if dest_lang != "all":
-        if output_file_format == "po":
-            translator.generate_po(pot_file_path, pot_target_field, source_lang, dest_lang, output_file_path)
+    if dest_lang_str != "all":
+        if output_format_str == "po":
+            translator.generate_po(pot_file_path, pot_field_str, source_lang_str, dest_lang_str, output_dir_path)
     else:
-        if output_file_format == "po":
-            translator.generate_pos(pot_file_path, pot_target_field, output_dir_path)
+        if output_format_str == "po":
+            translator.generate_pos(pot_file_path, pot_field_str, output_dir_path)
         
     return 0
 
